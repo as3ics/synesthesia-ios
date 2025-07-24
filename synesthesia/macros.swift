@@ -17,7 +17,9 @@ var samples_buffer: [Float] = []
 var fft_buffer: [Float] = []
 var amplitude: Float = 0.0
 var fft_max: Float = 0.0
+var peak_frequency: Float = 0.0
 var listening: Bool = false
+var sampling_rate: Double = 44100.0
 
 func startAudioInput() {
     listening = true
@@ -47,9 +49,11 @@ func startAudioInput() {
             
             amplitude = max_sample
             fft_max = max_fft
+            peak_frequency = getPeakFrequency(from: fft_buffer, M: M, sampleRate: 44100.0)
             
             print(String(format: "fft max: %.2f", fft_max))
-            print(String(format: "amplitude: %.2f\n", amplitude))
+            print(String(format: "amplitude: %.2f", amplitude))
+            print(String(format: "peak frequency: %.2f\n", peak_frequency))
         } else {
             stopAudioInput()
         }
@@ -78,6 +82,9 @@ func stopAudioInput() {
     
     fft_buffer = []
     samples_buffer = []
+    fft_max = 0.0
+    amplitude = 0.0
+    peak_frequency = 0.0
 }
 
 
@@ -104,7 +111,7 @@ func bufferToFloatArrayAllChannels(_ buffer: AVAudioPCMBuffer) -> [Float] {
 ///   - buffer: The audio buffer to analyze (mono or first channel only).
 ///   - M: The log2 of the FFT size (i.e., for 1024 samples, M = 10).
 /// - Returns: An array of normalized magnitudes (linear scale).
-func computeFFT(buffer: AVAudioPCMBuffer, M: Int) -> [Float] {
+func computeFFT(buffer: AVAudioPCMBuffer, M: Int, half: Bool = false) -> [Float] {
     let N = 1 << M
     guard let channelData = buffer.floatChannelData?[0] else {
         fatalError("Failed to access channel data.")
@@ -165,8 +172,55 @@ func computeFFT(buffer: AVAudioPCMBuffer, M: Int) -> [Float] {
     vDSP_vsmul(sqrtArray(magnitudes), 1, &scale, &normalizedMagnitudes, 1, vDSP_Length(N / 2))
     vDSP_destroy_fftsetup(fftSetup)
     
-//    return Array(normalizedMagnitudes[0..<normalizedMagnitudes.count / 2])
-    return normalizedMagnitudes
+    if(half) {
+        return Array(normalizedMagnitudes[0..<2 * normalizedMagnitudes.count / 4])
+    } else {
+        return normalizedMagnitudes
+    }
+    
+    
+}
+
+/// Returns the frequency (in Hz) of the peak magnitude in the FFT buffer.
+/// - Parameters:
+///   - fft: The FFT magnitudes array (e.g., `fft_buffer`)
+///   - M: The power-of-2 used for FFT size
+///   - sampleRate: The audio sample rate (e.g., 44100.0)
+/// - Returns: The frequency (Hz) of the peak bin
+func getPeakFrequency(from fft: [Float], M: Int, sampleRate: Double) -> Float {
+    guard !fft.isEmpty else { return 0.0 }
+
+    // Find index of max magnitude
+    var maxIndex: vDSP_Length = 0
+    var maxValue: Float = 0.0
+    vDSP_maxvi(fft, 1, &maxValue, &maxIndex, vDSP_Length(fft.count))
+
+    let binIndex = Int(maxIndex)
+    let fftSize = 1 << M
+    let frequencyResolution = sampleRate / Double(fftSize)
+
+    let peakFrequency = Double(binIndex) * frequencyResolution
+    return Float(peakFrequency)
+}
+
+/// Returns the max frequency (in Hz) in the FFT buffer.
+/// - Parameters:
+///   - fft: The FFT magnitudes array (e.g., `fft_buffer`)
+///   - M: The power-of-2 used for FFT size
+///   - sampleRate: The audio sample rate (e.g., 44100.0)
+/// - Returns: The frequency (Hz) of the peak bin
+func getMaxFrequency(from fft: [Float], M: Int, sampleRate: Double) -> Float {
+    guard !fft.isEmpty else { return 0.0 }
+
+    // Find index of max magnitude
+    var maxIndex: Int = fft.count - 1
+
+    let binIndex = maxIndex
+    let fftSize = 1 << M
+    let frequencyResolution = sampleRate / Double(fftSize)
+
+    let maxFrequency = Double(binIndex) * frequencyResolution
+    return Float(maxFrequency)
 }
 
 
